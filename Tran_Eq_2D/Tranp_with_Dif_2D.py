@@ -160,18 +160,61 @@ def assemble_stiffnessR(nelements, degree, spans, basis, weights, points, matrix
 
                       matrix[i1,i2,j1,j2]  += v
     return matrix 
+def assemble_stiffnessS(nelements, degree, spans, basis, weights, points, matrix):
 
+    # ... sizes
+    ne1, ne2              = nelements
+    p1, p2                = degree
+    spans_1, spans_2      = spans
+    basis_1, basis_2      = basis
+    weights_1, weights_2  = weights
+    points_1, points_2    = points
+    
+    k1 = weights_1.shape[1]
+    k2 = weights_2.shape[1]
+    # ...
+
+    # ... build matrices
+    for ie1 in range(0, ne1):
+        i_span_1 = spans_1[ie1]
+        for ie2 in range(0, ne2):
+            i_span_2 = spans_2[ie2]
+
+            for il_1 in range(0, p1+1):
+                i1 = i_span_1 - p1 + il_1
+                for il_2 in range(0, p2+1):                
+                  i2 = i_span_2 - p2 + il_2
+                  for jl_1 in range(0, p1+1):
+                    j1 = i_span_1 - p1 + jl_1
+                    for jl_2 in range(0, p2+1):
+                      j2 = i_span_2 - p2 + jl_2
+
+                      v = 0.0
+                      for g1 in range(0, k1):
+                        for g2 in range(0, k2):
+                          bi_x = basis_1[ie1, il_1, 1, g1] * basis_2[ie2, il_2, 0, g2]
+                          bi_y = basis_1[ie1, il_1, 0, g1] * basis_2[ie2, il_2, 1, g2]
+
+                          bj_x = basis_1[ie1, jl_1, 1, g1] * basis_2[ie2, jl_2, 0, g2]
+                          bj_y = basis_1[ie1, jl_1, 0, g1] * basis_2[ie2, jl_2, 1, g2]
+
+                          wvol = weights_1[ie1, g1] * weights_2[ie2, g2]
+                          v += (bi_x*bj_x+bi_y*bj_y) * wvol
+
+                      matrix[i1,i2,j1,j2]  += v
+    return matrix  
 # =======================Data===================================
-#ne =100# number of elements
-#T=0.0045
 c1=1
-c2=1    
+c2=1   
 p1  = 2 
 p2  = 2    # spline degree
-ne1 = 16   # number of elements
-ne2 = 16
-ht=0.00001
+ne1 = 32   # number of elements
+ne2 = 32
+ht=0.0001
 Tmax=1
+eps=0.1  #diffusion parameter
+teta=1     #Shema parameter
+
 print('~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~')
 print('Simulation with Ncells :=','[',ne1,'X',ne2,']',' Spline degree =',p1)
 print('---------------------------------------------------------------------------')
@@ -234,10 +277,12 @@ start = time.time()
 stiffnessM = zeros((nbasis1,nbasis1,nbasis2,nbasis2))
 stiffnessN = zeros((nbasis1,nbasis1,nbasis2,nbasis2))
 stiffnessR = zeros((nbasis1,nbasis1,nbasis2,nbasis2))
+stiffnessS = zeros((nbasis1,nbasis1,nbasis2,nbasis2))
 
 stiffnessM = assemble_stiffnessM((nelements1,nelements2), (p1,p2), (spans1,spans2), (basis1, basis2), (weights1,weights2), (points1,points2), matrix=stiffnessM)
 stiffnessN = assemble_stiffnessN((nelements1,nelements2), (p1,p2), (spans1,spans2), (basis1, basis2), (weights1,weights2), (points1,points2), matrix=stiffnessN)
 stiffnessR = assemble_stiffnessR((nelements1,nelements2), (p1,p2), (spans1,spans2), (basis1, basis2), (weights1,weights2), (points1,points2), matrix=stiffnessR)
+stiffnessS = assemble_stiffnessS((nelements1,nelements2), (p1,p2), (spans1,spans2), (basis1, basis2), (weights1,weights2), (points1,points2), matrix=stiffnessS)
 
 M=zeros((nbasis1 *nbasis2, nbasis1 *nbasis2))
 M = Matrix_System(stiffnessM, (nbasis1, nbasis2), M, p1)
@@ -245,23 +290,30 @@ N=zeros((nbasis1 *nbasis2, nbasis1 *nbasis2))
 N = Matrix_System(stiffnessN, (nbasis1, nbasis2), N, p1)
 R=zeros((nbasis1 *nbasis2, nbasis1 *nbasis2))
 R = Matrix_System(stiffnessR, (nbasis1, nbasis2), R, p1)
+S=zeros((nbasis1 *nbasis2, nbasis1 *nbasis2))
+S = Matrix_System(stiffnessS, (nbasis1, nbasis2), S, p1)
 #------------------------------------------------------------------------------------------
 z=0
 ky0=list(range(nbasis1))
 kx0=list(np.array(ky0,int)*nbasis1)
+kx1=list((1+np.array(ky0,int))*nbasis1-1)
 ky1=list((nbasis2-1)*nbasis1+np.array(ky0,int))
-G = M+ht*(c1*N+c2*R)
+
+
+G = M+teta*ht*(c1*N+c2*R+eps*S)
 G = csc_matrix(G,dtype=np.float64)
 # Factorisation LU of A
 lu    =     sla.splu(G)
-freq = 100
+freq = 10
 i = 0
 while z<=Tmax:    
-    S=np.dot(M,f[:])
+    S=np.dot(M-(1-teta)*ht*(c1*N+c2*R+eps*S),f[:])
     # resulotion of system AX=B
     X = lu.solve(S)
     X[kx0]=0
     X[ky0]=0
+    #X[kx1]=0
+    #X[ky1]=0
     u = zeros((nbasis1,nbasis2))
     for j in range(nbasis2):
         jj = I+j*nbasis1
